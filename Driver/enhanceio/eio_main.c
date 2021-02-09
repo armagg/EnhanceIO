@@ -722,7 +722,7 @@ int eio_clean_thread_proc(void *context)
 			eio_clean_all(dmc);
 
 			/* resume the periodic clean */
-			spin_lock_irqsave(&dmc->dirty_set_lru_lock, flags);
+			spin_lock_irqsave(&dmc->dirty_set_mru_lock, flags);
 			dmc->is_clean_aged_sets_sched = 0;
 			if (dmc->sysctl_active.time_based_clean_interval
 			    && atomic64_read(&dmc->nr_dirty)) {
@@ -737,7 +737,7 @@ int eio_clean_thread_proc(void *context)
 						      * 60 * HZ);
 				dmc->is_clean_aged_sets_sched = 1;
 			}
-			spin_unlock_irqrestore(&dmc->dirty_set_lru_lock, flags);
+			spin_unlock_irqrestore(&dmc->dirty_set_mru_lock, flags);
 		}
 
 		if (dmc->sysctl_active.fast_remove)
@@ -777,7 +777,7 @@ int eio_clean_thread_proc(void *context)
 
 				/*
 				 * Since we are not cleaning the set, we should
-				 * put the set back in the lru list so that
+				 * put the set back in the mru list so that
 				 * it is picked up at a later point.
 				 * We also need to clear the clean inprog flag
 				 * otherwise this set would never be cleaned.
@@ -790,10 +790,10 @@ int eio_clean_thread_proc(void *context)
 					  SETFLAG_CLEAN_WHOLE);
 				spin_unlock_irqrestore(&dmc->cache_sets[index].
 						       cs_lock, flags);
-				spin_lock_irqsave(&dmc->dirty_set_lru_lock,
+				spin_lock_irqsave(&dmc->dirty_set_mru_lock,
 						  flags);
-				lru_touch(dmc->dirty_set_lru, index, systime);
-				spin_unlock_irqrestore(&dmc->dirty_set_lru_lock,
+				mru_touch(dmc->dirty_set_mru, index, systime);
+				spin_unlock_irqrestore(&dmc->dirty_set_mru_lock,
 						       flags);
 			}
 			atomic64_dec(&dmc->clean_pendings);
@@ -1030,7 +1030,7 @@ find_valid_dbn(struct cache_c *dmc, sector_t dbn,
 			*index = i;
 			if ((EIO_CACHE_STATE_GET(dmc, i) & BLOCK_IO_INPROG) ==
 			    0)
-				eio_policy_reclaim_lru_movetail(dmc, i,
+				eio_policy_reclaim_mru_movetail(dmc, i,
 								dmc->
 								policy_ops);
 			return;
@@ -1047,7 +1047,7 @@ static index_t find_invalid_dbn(struct cache_c *dmc, index_t start_index)
 	/* Find INVALID slot that we can reuse */
 	for (i = start_index; i < end_index; i++) {
 		if (EIO_CACHE_STATE_GET(dmc, i) == INVALID) {
-			eio_policy_reclaim_lru_movetail(dmc, i,
+			eio_policy_reclaim_mru_movetail(dmc, i,
 							dmc->policy_ops);
 			return i;
 		}
@@ -1360,11 +1360,11 @@ static void eio_post_mdupdate(struct work_struct *work)
 
 	/*
 	 * if dirty block was added
-	 * 1. update the cache set lru list
+	 * 1. update the cache set mru list
 	 * 2. check and initiate cleaning if thresholds are crossed
 	 */
 	if (!error) {
-		eio_touch_set_lru(dmc, set_index);
+		eio_touch_set_mru(dmc, set_index);
 		eio_comply_dirty_thresholds(dmc, set_index);
 	}
 
@@ -1509,18 +1509,18 @@ static void eio_check_dirty_cache_thresholds(struct cache_c *dmc)
 					   100));
 		enqueued_cleans = 0;
 
-		spin_lock_irqsave(&dmc->dirty_set_lru_lock, flags);
+		spin_lock_irqsave(&dmc->dirty_set_mru_lock, flags);
 		do {
-			lru_rem_head(dmc->dirty_set_lru, &set_index, &set_time);
-			if (set_index == LRU_NULL)
+			mru_rem_head(dmc->dirty_set_mru, &set_index, &set_time);
+			if (set_index == MRU_NULL)
 				break;
 
 			enqueued_cleans += dmc->cache_sets[set_index].nr_dirty;
-			spin_unlock_irqrestore(&dmc->dirty_set_lru_lock, flags);
+			spin_unlock_irqrestore(&dmc->dirty_set_mru_lock, flags);
 			eio_addto_cleanq(dmc, set_index, 1);
-			spin_lock_irqsave(&dmc->dirty_set_lru_lock, flags);
+			spin_lock_irqsave(&dmc->dirty_set_mru_lock, flags);
 		} while (enqueued_cleans <= required_cleans);
-		spin_unlock_irqrestore(&dmc->dirty_set_lru_lock, flags);
+		spin_unlock_irqrestore(&dmc->dirty_set_mru_lock, flags);
 		spin_lock_irqsave(&dmc->clean_sl, flags);
 		dmc->clean_excess_dirty = 0;
 		spin_unlock_irqrestore(&dmc->clean_sl, flags);
@@ -3019,7 +3019,7 @@ void eio_clean_for_reboot(struct cache_c *dmc)
 
 /*
  * Used during the partial cache set clean.
- * Uses reclaim policy(LRU/FIFO) information to
+ * Uses reclaim policy(mru/FIFO) information to
  * identify the cache blocks that needs cleaning.
  * The number of such cache blocks is determined
  * by the high and low thresholds set.
@@ -3148,7 +3148,7 @@ eio_clean_set(struct cache_c *dmc, index_t set, int whole, int force)
 
 	/* If this is not the suitable time to clean, postpone it */
 	if ((!force) && AUTOCLEAN_THRESHOLD_CROSSED(dmc)) {
-		eio_touch_set_lru(dmc, set);
+		eio_touch_set_mru(dmc, set);
 		goto err_out1;
 	}
 
@@ -3404,10 +3404,10 @@ err_out1:
 
 	if (dmc->cache_sets[set].nr_dirty)
 		/*
-		 * Lru touch the set, so that it can be picked
+		 * mru touch the set, so that it can be picked
 		 * up for whole set clean by clean thread later
 		 */
-		eio_touch_set_lru(dmc, set);
+		eio_touch_set_mru(dmc, set);
 
 	return;
 }
@@ -3436,35 +3436,35 @@ void eio_clean_aged_sets(struct work_struct *work)
 		 * This is to make sure that this thread is rescheduled
 		 * once CACHE is ACTIVE again.
 		 */
-		spin_lock_irqsave(&dmc->dirty_set_lru_lock, flags);
+		spin_lock_irqsave(&dmc->dirty_set_mru_lock, flags);
 		dmc->is_clean_aged_sets_sched = 0;
-		spin_unlock_irqrestore(&dmc->dirty_set_lru_lock, flags);
+		spin_unlock_irqrestore(&dmc->dirty_set_mru_lock, flags);
 
 		return;
 	}
 
 	cur_time = jiffies;
 
-	/* Use the set LRU list to pick up the most aged sets. */
-	spin_lock_irqsave(&dmc->dirty_set_lru_lock, flags);
+	/* Use the set mru list to pick up the most aged sets. */
+	spin_lock_irqsave(&dmc->dirty_set_mru_lock, flags);
 	do {
-		lru_read_head(dmc->dirty_set_lru, &set_index, &set_time);
-		if (set_index == LRU_NULL)
+		mru_read_head(dmc->dirty_set_mru, &set_index, &set_time);
+		if (set_index == MRU_NULL)
 			break;
 
 		/* if the most aged set is younger than clean_interval, break */
 		if ((EIO_DIV((cur_time - set_time), HZ)) <
 		    (dmc->sysctl_active.time_based_clean_interval * 60))
 			break;
-		lru_rem(dmc->dirty_set_lru, set_index);
+		mru_rem(dmc->dirty_set_mru, set_index);
 
 		if (dmc->cache_sets[set_index].nr_dirty > 0) {
-			spin_unlock_irqrestore(&dmc->dirty_set_lru_lock, flags);
+			spin_unlock_irqrestore(&dmc->dirty_set_mru_lock, flags);
 			eio_addto_cleanq(dmc, set_index, 1);
-			spin_lock_irqsave(&dmc->dirty_set_lru_lock, flags);
+			spin_lock_irqsave(&dmc->dirty_set_mru_lock, flags);
 		}
 	} while (1);
-	spin_unlock_irqrestore(&dmc->dirty_set_lru_lock, flags);
+	spin_unlock_irqrestore(&dmc->dirty_set_mru_lock, flags);
 
 	/* Re-schedule the aged set clean, unless the clean has to stop now */
 
@@ -3478,15 +3478,15 @@ out:
 	return;
 }
 
-/* Move the given set at the head of the set LRU list */
-void eio_touch_set_lru(struct cache_c *dmc, index_t set)
+/* Move the given set at the head of the set mru list */
+void eio_touch_set_mru(struct cache_c *dmc, index_t set)
 {
 	u_int64_t systime;
 	unsigned long flags;
 
 	systime = jiffies;
-	spin_lock_irqsave(&dmc->dirty_set_lru_lock, flags);
-	lru_touch(dmc->dirty_set_lru, set, systime);
+	spin_lock_irqsave(&dmc->dirty_set_mru_lock, flags);
+	mru_touch(dmc->dirty_set_mru, set, systime);
 
 	if ((dmc->sysctl_active.time_based_clean_interval > 0) &&
 	    (dmc->is_clean_aged_sets_sched == 0)) {
@@ -3496,5 +3496,5 @@ void eio_touch_set_lru(struct cache_c *dmc, index_t set)
 		dmc->is_clean_aged_sets_sched = 1;
 	}
 
-	spin_unlock_irqrestore(&dmc->dirty_set_lru_lock, flags);
+	spin_unlock_irqrestore(&dmc->dirty_set_mru_lock, flags);
 }

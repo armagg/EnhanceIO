@@ -1507,7 +1507,7 @@ static int eio_policy_switch(struct cache_c *dmc, u_int32_t policy)
 		goto out;
 	}
 
-	eio_policy_lru_pushblks(dmc->policy_ops);
+	eio_policy_mru_pushblks(dmc->policy_ops);
 	dmc->req_policy = policy;
 	return 0;
 

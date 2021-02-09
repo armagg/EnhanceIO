@@ -32,8 +32,8 @@
  */
 
 /*
- * The LRU pointers are maintained as set-relative offsets, instead of
- * pointers. This enables us to store the LRU pointers per cacheblock
+ * The mru pointers are maintained as set-relative offsets, instead of
+ * pointers. This enables us to store the mru pointers per cacheblock
  * using 4 bytes instead of 16 bytes. The upshot of this is that we
  * are required to clamp the associativity at an 8K max.
  *
@@ -41,23 +41,23 @@
  * maximum associativity should be 32K (2^15) and not 8K.
  */
 #define EIO_MAX_ASSOC   8192
-#define EIO_LRU_NULL    0xFFFF
+#define EIO_MRU_NULL    0xFFFF
 
 /* Declerations to keep the compiler happy */
 struct cache_c;
 struct eio_policy;
-struct eio_lru;
+struct eio_mru;
 
-/* LRU specific data structures and functions */
-struct eio_lru {
-	void (*sl_lru_pushblks)(struct eio_policy *);
-	void (*sl_reclaim_lru_movetail)(struct cache_c *, index_t,
+/* MRU specific data structures and functions */
+struct eio_mru {
+	void (*sl_mru_pushblks)(struct eio_policy *);
+	void (*sl_reclaim_mru_movetail)(struct cache_c *, index_t,
 					struct eio_policy *);
 };
 
-/* Function prototypes for LRU wrappers in eio_policy.c */
-void eio_policy_lru_pushblks(struct eio_policy *);
-void eio_policy_reclaim_lru_movetail(struct cache_c *, index_t,
+/* Function prototypes for mru wrappers in eio_policy.c */
+void eio_policy_mru_pushblks(struct eio_policy *);
+void eio_policy_reclaim_mru_movetail(struct cache_c *, index_t,
 				     struct eio_policy *);
 
 /*
@@ -67,7 +67,7 @@ void eio_policy_reclaim_lru_movetail(struct cache_c *, index_t,
 struct eio_policy {
 	int sp_name;
 	union {
-		struct eio_lru *lru;
+		struct eio_mru *mru;
 	} sp_policy;
 	int (*sp_repl_init)(struct cache_c *);
 	void (*sp_repl_exit)(void);
